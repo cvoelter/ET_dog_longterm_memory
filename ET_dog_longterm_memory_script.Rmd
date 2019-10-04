@@ -1,0 +1,706 @@
+---
+title: "ET_ltMemory_glmm"
+author: "Christoph Völter"
+date: "29 September 2019"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library (car)
+library(lme4)
+library(readr)
+library(tidyverse)
+library(sjPlot)
+library(ggthemes)
+library(ggplot2)
+library(scales)
+library(gridExtra)
+library(psych)
+library(cowplot)
+library(glmmTMB)
+library(summarytools)
+source("../../R scripts/Roger/diagnostic_fcns.r")
+source("../../R scripts/Roger/glmm_stability.r")
+source("../../R scripts/Roger/boxplotteR.r")
+source("../../R scripts/Roger/boot_glmm.r")
+source("../../R scripts/Roger/corr_exact.r")
+#load(file =".RData")
+```
+
+```{r loading data, include = FALSE, warning = FALSE}
+#Preparing code for mixed modeling. 
+orig.data <- read.table(file="data/ET_lt_memory_AOIreport.txt", header=T, sep="\t")
+str(orig.data)
+#describeBy(orig.data)
+
+all.data<-orig.data%>%
+ # filter(IA_DWELL_TIME__prop!=".")%>%
+  #filter(IA_AVERAGE_FIX_PUPIL_SIZE!=".")%>%
+  filter(Subject!="lara")%>% #completed only session 2
+  droplevels()%>%
+  mutate(target = ifelse(location=="left" & IA_LABEL=="AOI_object_left","target",
+                         (ifelse(location=="right" & IA_LABEL=="AOI_object_left","distractor",
+                                 (ifelse(location=="right" & IA_LABEL=="AOI_object_right","target",
+                                         (ifelse(location=="left" & IA_LABEL=="AOI_object_right","distractor",
+                                                 (ifelse(location=="left" & IA_LABEL=="Left_half_display","target",
+                                                         (ifelse(location=="right" & IA_LABEL=="Left_half_display","distractor",
+                                                                 (ifelse(location=="right" & IA_LABEL=="Right_half_display","target",
+                                                                         (ifelse(location=="left" & IA_LABEL=="Right_half_display","distractor",""
+                                                                                 ))))))))))))))))
+table(all.data$target,all.data$IA_LABEL)
+#all.data$IA_DWELL_TIME__prop=as.numeric(as.character(all.data$IA_DWELL_TIME__prop))
+#all.data$IA_AVERAGE_FIX_PUPIL_SIZE=as.numeric(as.character(all.data$IA_AVERAGE_FIX_PUPIL_SIZE))
+
+
+
+view(dfSummary(all.data))
+
+```
+
+
+
+
+
+##Summary
+Both the paired-samples t-test and a mixed model show a significant effect for condition. There was no significant interaction between session and condition. 
+
+
+##Plotting data
+
+###IP1
+
+
+```{r error=FALSE, echo=FALSE}
+
+  
+
+plot_target_IP1_obj <- all.data %>%
+  filter(IP_LABEL=="IP1")%>%
+  filter(IA_LABEL=="AOI_object_right" | IA_LABEL=="AOI_object_left")%>%
+  filter(target=="target")%>%
+  group_by(Session,IA_LABEL, location,Subject ) %>% 
+  summarize(prop_dwell = mean(IA_DWELL_TIME__prop))  %>% 
+  mutate(prop_dwell = round(prop_dwell/0.01)*0.01)%>%
+  add_count(prop_dwell)
+
+loc.labs <- c("Target on the left", "Target on the right")
+names(loc.labs) <- c("AOI_object_left", "AOI_object_right")
+
+p_target_IP1_obj<-ggplot(
+  data=plot_target_IP1_obj, aes(as.factor(Session), prop_dwell, group=Subject)) +   
+  geom_boxplot(aes(group=interaction(Session, IA_LABEL)), width=0.9, outlier.colour="white")+
+  geom_point(size = plot_target_IP1_obj$n, colour = "darkgrey", alpha=0.25) +
+  geom_line(lty=2, alpha=0.4, colour="darkgrey")+
+  ylim(0,1)+
+  labs(x="Session",y="Proportion looking time to target box")+
+  theme_few()+
+  theme(axis.ticks.x=element_blank(), axis.title.x = element_text(size=10),axis.title.y = element_text(size=8), plot.title = element_text(size=10), plot.caption = element_text(size=10))+
+    facet_wrap(~ IA_LABEL,labeller=labeller(IA_LABEL=loc.labs))
+ 
+p_target_IP1_obj
+
+ggsave(filename = "ET_lt_IP1_IAObj_by_target_side.png", width = 10, height = 8, units = "cm")
+```
+```{r error=FALSE, echo=FALSE}
+
+  
+
+plot_target_IP1_displ <- all.data %>%
+  filter(IP_LABEL=="IP1")%>%
+  filter(IA_LABEL=="Left_half_display" | IA_LABEL=="Right_half_display")%>%
+  filter(target=="target")%>%
+  group_by(Session,IA_LABEL, location,Subject ) %>% 
+  summarize(prop_dwell = mean(IA_DWELL_TIME__prop))  %>% 
+  mutate(prop_dwell = round(prop_dwell/0.01)*0.01)%>%
+  add_count(prop_dwell)
+
+loc.labs <- c("Target on the left", "Target on the right")
+names(loc.labs) <- c("Left_half_display", "Right_half_display")
+
+p_target_IP1_displ<-ggplot(
+  data=plot_target_IP1_displ, aes(as.factor(Session), prop_dwell, group=Subject)) +   
+  geom_boxplot(aes(group=interaction(Session, IA_LABEL)), width=0.9, outlier.colour="white")+
+  geom_point(size = plot_target_IP1_displ$n, colour = "darkgrey", alpha=0.25) +
+  geom_line(lty=2, alpha=0.4, colour="darkgrey")+
+  ylim(0,1)+
+  labs(x="Session",y="Proportion looking time to target side")+
+  theme_few()+
+  theme(axis.ticks.x=element_blank(), axis.title.x = element_text(size=10),axis.title.y = element_text(size=8), plot.title = element_text(size=10), plot.caption = element_text(size=10))+
+    facet_wrap(~ IA_LABEL,labeller=labeller(IA_LABEL=loc.labs))
+ 
+p_target_IP1_displ
+
+#ggsave(filename = "ET_lt_IP1_IAhalfDisplay_by_target_side.png", width = 10, height = 8, units = "cm")
+```
+
+```{r error=FALSE, echo=FALSE}
+
+  
+
+plot_target_IP1_targ <- all.data %>%
+  filter(IP_LABEL=="IP1")%>%
+  filter(IA_LABEL=="Left_half_display" | IA_LABEL=="Right_half_display")%>%
+  group_by(Session,target,Subject ) %>% 
+  summarize(prop_dwell = mean(IA_DWELL_TIME__prop))  %>% 
+  mutate(prop_dwell = round(prop_dwell/0.01)*0.01)%>%
+  add_count(prop_dwell)
+
+
+p_target_IP1_targ<-ggplot(
+  data=plot_target_IP1_targ, aes(as.factor(Session), prop_dwell, group=Subject)) +   
+  geom_boxplot(aes(group=interaction(Session, target)), width=0.9, outlier.colour="white")+
+  geom_point(size = plot_target_IP1_targ$n, colour = "darkgrey", alpha=0.25) +
+  #geom_line(lty=2, alpha=0.4, colour="darkgrey")+
+  ylim(0,1)+
+  labs(x="Session",y="Proportion looking time to target side")+
+  theme_few()+
+  theme(axis.ticks.x=element_blank(), axis.title.x = element_text(size=10), plot.title = element_text(size=12), plot.caption = element_text(size=10))+
+    facet_wrap(~ target)#,labeller=labeller(IA_LABEL=loc.labs))
+ 
+p_target_IP1_targ
+
+#ggsave(filename = "ET_lt_IP1_IAhalfDisplay_by_target_side.png", width = 10, height = 8, units = "cm")
+```
+
+
+```{r error=FALSE, echo=FALSE}
+
+  
+
+plot_target_IP1reach_displ <- all.data %>%
+  filter(IP_LABEL=="IP1_reach")%>%
+  filter(IA_LABEL=="Left_half_display" | IA_LABEL=="Right_half_display")%>%
+  filter(target=="target")%>%
+  group_by(Session,IA_LABEL, Subject ) %>% 
+  summarize(prop_dwell = mean(IA_DWELL_TIME__prop))  %>% 
+  mutate(prop_dwell = round(prop_dwell/0.01)*0.01)%>%
+  add_count(prop_dwell)
+
+loc.labs <- c("Target on the left", "Target on the right")
+names(loc.labs) <- c("Left_half_display", "Right_half_display")
+
+p_target_IP1reach_displ<-ggplot(
+  data=plot_target_IP1reach_displ, aes(as.factor(Session), prop_dwell, group=Subject)) +   
+  geom_boxplot(aes(group=interaction(Session, IA_LABEL)), width=0.9, outlier.colour="white")+
+  geom_point(size = plot_target_IP1reach_displ$n, colour = "darkgrey", alpha=0.25) +
+  geom_line(lty=2, alpha=0.4, colour="darkgrey")+
+  ylim(0,1)+
+  labs(x="Session",y="Proportion looking time to target side")+
+  theme_few()+
+  theme(axis.ticks.x=element_blank(), axis.title.x = element_text(size=10),axis.title.y = element_text(size=8), plot.title = element_text(size=10), plot.caption = element_text(size=10))+
+    facet_wrap(~ IA_LABEL,labeller=labeller(IA_LABEL=loc.labs))
+ 
+p_target_IP1reach_displ
+
+ggsave(filename = "ET_lt_IP1Reach_IAhalfDisplay_by_target_side.png", width = 10, height = 8, units = "cm")
+```
+```{r error=FALSE, echo=FALSE}
+
+  
+
+plot_target_IP_AN1_displ <- all.data %>%
+  filter(IP_LABEL=="IP_AN1")%>%
+  filter(IA_LABEL=="Left_half_display" | IA_LABEL=="Right_half_display")%>%
+  filter(target=="target")%>%
+  group_by(Session,IA_LABEL, Subject ) %>% 
+  summarize(prop_dwell = mean(IA_DWELL_TIME__prop))  %>% 
+  mutate(prop_dwell = round(prop_dwell/0.01)*0.01)%>%
+  add_count(prop_dwell)
+
+loc.labs <- c("Target on the left", "Target on the right")
+names(loc.labs) <- c("Left_half_display", "Right_half_display")
+
+p_target_IP1_AN1_displ<-ggplot(
+  data=plot_target_IP_AN1_displ, aes(as.factor(Session), prop_dwell, group=Subject)) +   
+  geom_boxplot(aes(group=interaction(Session, IA_LABEL)), width=0.9, outlier.colour="white")+
+  geom_point(size = plot_target_IP_AN1_displ$n, colour = "darkgrey", alpha=0.25) +
+  geom_line(lty=2, alpha=0.4, colour="darkgrey")+
+  ylim(0,1)+
+  labs(x="Session",y="Proportion looking time to target side")+
+  theme_few()+
+  theme(axis.ticks.x=element_blank(), axis.title.x = element_text(size=10),axis.title.y = element_text(size=8), plot.title = element_text(size=10), plot.caption = element_text(size=10))+
+    facet_wrap(~ IA_LABEL,labeller=labeller(IA_LABEL=loc.labs))
+
+p_target_IP1_AN1_displ
+
+#ggsave(filename = "ET_lt_IP1Reach_IAhalfDisplay_by_target_side.png", width = 10, height = 8, units = "cm")
+```
+##AOI: Object
+```{r error=FALSE, echo=FALSE}
+
+  
+
+plot_target_IP1_obj <- all.data %>%
+  filter(IP_LABEL=="IP1")%>%
+  filter(IA_LABEL=="AOI_object_right" | IA_LABEL=="AOI_object_left")%>%
+  filter(target=="target")%>%
+  group_by(Session,IA_LABEL, Subject ) %>% 
+  summarize(prop_dwell = mean(IA_DWELL_TIME__prop))  %>% 
+  mutate(prop_dwell = round(prop_dwell/0.01)*0.01)%>%
+  add_count(prop_dwell)
+
+loc.labs <- c("Target on the left", "Target on the right")
+names(loc.labs) <- c("AOI_object_left", "AOI_object_right")
+
+p_target_IP1_obj<-ggplot(
+  data=plot_target_IP1_obj, aes(as.factor(Session), prop_dwell, group=Subject)) +   
+  geom_boxplot(aes(group=interaction(Session, IA_LABEL)), width=0.9, outlier.colour="white")+
+  geom_point(size = plot_target_IP1_obj$n, colour = "darkgrey", alpha=0.25) +
+  #geom_line(lty=2, alpha=0.4, colour="darkgrey")+
+  ylim(0,1)+
+  labs(x="Session",y="Proportion looking time to target side")+
+  theme_few()+
+  theme(axis.ticks.x=element_blank(), axis.title.x = element_text(size=10), plot.title = element_text(size=12), plot.caption = element_text(size=10))+
+    facet_wrap(~ IA_LABEL,labeller=labeller(IA_LABEL=loc.labs))
+ 
+p_target_IP1_obj
+
+ggsave(filename = "ET_lt_IP1_IA_AOIObject_by_target_side.png", width = 10, height = 8, units = "cm")
+```
+##Agent head
+```{r error=FALSE, echo=FALSE}
+
+  
+
+plot_head <- all.data %>%
+  filter(IP_LABEL=="IP1")%>%
+  filter(IA_LABEL=="AOI_agent_head")%>%
+  group_by(Session,Subject ) %>% 
+  summarize(prop_dwell = mean(IA_DWELL_TIME__prop))  %>% 
+  mutate(prop_dwell = round(prop_dwell/0.01)*0.01)%>%
+  add_count(prop_dwell)
+
+
+
+p_head<-ggplot(
+  data=plot_head, aes(as.factor(Session), prop_dwell)) +   
+  geom_boxplot(aes(as.factor(Session)),width=0.9, outlier.colour="white")+
+  geom_point(size = plot_head$n, colour = "darkgrey", alpha=0.25) +
+  geom_line(lty=2, alpha=0.4, colour="darkgrey")+
+  ylim(0,1)+
+  labs(x="Session",y="Proportion looking time to agent head")+
+  theme_few()+
+  theme(axis.ticks.x=element_blank(), axis.title.x = element_text(size=10), plot.title = element_text(size=10), plot.caption = element_text(size=10))
+
+ 
+p_head
+
+#ggsave(filename = "ET_lt_IP1_IA_AOIAgentHead_by_session.png", width = 10, height = 8, units = "cm")
+```
+
+```{r} 
+
+
+p<-plot_grid(p_target_IP1_displ, p_target_IP1reach_displ,p_target_IP1_AN1_displ, labels = c('Anticipation phase (3000 ms)', 'Follow hand movement (818 ms)', 'Animal uncovered (4584 ms)'), label_size = 10, label_x = c(-0.25, -0.3, -0.25) , nrow=3)
+
+p2<-plot_grid(p,  ncol=2, rel_widths = c(1,1))
+
+ggdraw(p2) + 
+  draw_image("heatmaps/IP_AN1_S1S2.png", x = 1, y = 0.445, hjust = 1, vjust = 1, width = 0.5, height = 0.5)+
+    draw_image("heatmaps/IP1_S1S2.png", x = 1, y = 1.11, hjust = 1, vjust = 1, width = 0.5, height = 0.5)+
+    draw_image("heatmaps/IP1_reach_S1S2.png", x = 1, y = 0.775, hjust = 1, vjust = 1, width = 0.5, height = 0.5)
+
+ggsave("overview.png", width = 17, height = 22, units = "cm")
+
+```
+
+
+
+
+\pagebreak  
+``
+
+``` {r mixed modeling, error=TRUE}
+
+model.data1 <- all.data %>% 
+  filter(IP_LABEL=="IP_AN1")%>%
+  filter(IA_LABEL=="AOI_object_left" | IA_LABEL=="AOI_object_right")%>%
+  select(Subject,location,target,Session,IP_LABEL, IA_DWELL_TIME__prop)%>%
+  spread(target,IA_DWELL_TIME__prop)%>%
+  rename(dwell.prop.target=target)%>%
+  rename(dwell.prop.distractor=distractor)
+
+model.data <- all.data %>% 
+  filter(IP_LABEL=="IP_AN1")%>%
+  filter(IA_LABEL=="AOI_object_left" | IA_LABEL=="AOI_object_right")%>%
+  select(Subject,location,target,Session,IP_LABEL, IA_DWELL_TIME)%>%
+  spread(target,IA_DWELL_TIME)%>%
+  rename(dwell.target=target)%>%
+  rename(dwell.distractor=distractor)%>%
+  full_join(model.data1)%>%
+  mutate(dwell_prop_target_halves=(dwell.target/(dwell.target+dwell.distractor)))%>%
+  mutate(dwell_both_halves=(dwell.target+dwell.distractor))%>%
+  mutate(Session = as.factor(Session))#%>%
+  #drop_na(dwell_prop_target_halves)
+
+ggplot(
+  data=model.data, aes(interaction(Session,location), dwell.prop.target)) +   
+  geom_boxplot(aes(interaction(Session,location)),width=0.9, outlier.colour="black")
+
+```
+
+
+individuals only who looked at the animals in session 1
+``` {r mixed modeling, error=TRUE}
+
+model.data1 <- all.data %>% 
+  filter(Subject=="Aeden"| Subject=="Akina" |Subject=="Calisle" |Subject=="Akina" |Subject=="Chasie" |Subject=="Emily" |Subject=="Gatsby" |Subject=="Kayl" |Subject=="Linus" |Subject=="Maeva" |Subject=="Miley")%>%
+  filter(IP_LABEL=="IP1")%>%
+  filter(IA_LABEL=="Left_half_display" | IA_LABEL=="Right_half_display")%>%
+  select(Subject,location,target,Session,IP_LABEL, IA_DWELL_TIME__prop)%>%
+  spread(target,IA_DWELL_TIME__prop)%>%
+  rename(dwell.prop.target=target)%>%
+  rename(dwell.prop.distractor=distractor)
+
+model.data <- all.data %>% 
+  filter(Subject=="Aeden"| Subject=="Akina" |Subject=="Calisle" |Subject=="Akina" |Subject=="Chasie" |Subject=="Emily" |Subject=="Gatsby" |Subject=="Kayl" |Subject=="Linus" |Subject=="Maeva" |Subject=="Miley")%>%
+  filter(IP_LABEL=="IP1")%>%
+  filter(IA_LABEL=="Left_half_display" | IA_LABEL=="Right_half_display")%>%
+  select(Subject,location,target,Session,IP_LABEL, IA_DWELL_TIME)%>%
+  spread(target,IA_DWELL_TIME)%>%
+  rename(dwell.target=target)%>%
+  rename(dwell.distractor=distractor)%>%
+  full_join(model.data1)%>%
+  mutate(dwell_prop_target_halves=(dwell.target/(dwell.target+dwell.distractor)))%>%
+  mutate(dwell_both_halves=(dwell.target+dwell.distractor))%>%
+  mutate(Session = as.factor(Session))%>%
+  drop_na(dwell_prop_target_halves)
+
+ggplot(
+  data=model.data, aes(interaction(Session,location), dwell_prop_target_halves)) +   
+  geom_boxplot(aes(interaction(Session,location)),width=0.9)#, outlier.colour="white")
+
+```
+
+
+
+##GLMM for IP1
+```{r}
+
+
+model.data1 <- all.data %>% 
+  filter(IP_LABEL=="IP1")%>%
+  filter(IA_LABEL=="Left_half_display" | IA_LABEL=="Right_half_display")%>%
+  select(Subject,location,target,Session,IP_LABEL, IA_DWELL_TIME__prop)%>%
+  spread(target,IA_DWELL_TIME__prop)%>%
+  rename(dwell.prop.target=target)%>%
+  rename(dwell.prop.distractor=distractor)
+
+model.data <- all.data %>% 
+  filter(IP_LABEL=="IP1")%>%
+  filter(IA_LABEL=="Left_half_display" | IA_LABEL=="Right_half_display")%>%
+  select(Subject,location,target,Session,IP_LABEL, IA_DWELL_TIME)%>%
+  spread(target,IA_DWELL_TIME)%>%
+  rename(dwell.target=target)%>%
+  rename(dwell.distractor=distractor)%>%
+  full_join(model.data1)%>%
+  mutate(dwell_prop_target_halves=(dwell.target/(dwell.target+dwell.distractor)))%>%
+  mutate(dwell_both_halves=(dwell.target+dwell.distractor))%>%
+  mutate(Session = scale(Session))
+
+model.data$resp=model.data$dwell.prop.target
+model.data$resp <- (model.data$resp*(length(model.data$resp) - 1) + 0.5)/length(model.data$resp) 
+model.data<-model.data%>%drop_na(resp)
+
+
+## code to run the model
+mm.ip1.displ=glmmTMB(resp~Session+location+
+      (1|Subject)+(0+Session|Subject),# weights=dwell_both_halves,#
+      data=model.data, family=beta_family, 
+      control=glmmTMBControl(optCtrl=list(iter.max=1000000, eval.max=1000000)))
+mm.ip1.displ$sdr$pdHess
+summary(mm.ip1.displ)
+overdisp.test(mm.ip1.displ)
+
+
+```
+####Null model	 
+```{r}	 
+mm.ip1.displ.null=glmmTMB(resp~1+
+      (1|Subject)+(0+Session|Subject),# weights=dwell_both_halves,#
+      data=model.data, family=beta_family, 
+      control=glmmTMBControl(optCtrl=list(iter.max=1000000, eval.max=1000000)))
+
+```
+####Full-null model comparison
+```{r}	 
+anova(mm.ip1.displ, mm.ip1.displ.null, test="Chisq")
+```
+####Model output
+  + Coefficients
+```{r}
+round(summary(mm.ip1.displ)$coefficients$cond, 3)
+```
+  + Individual predictors: likelihood ratio tests  
+Drop1: P values for the individual effects were based on likelihood ratio tests comparing the full with respective reduced models (Barr et al., 2013; R function drop1 with argument 'test' set to "Chisq"). 
+```{r}
+xdrop1=drop1(mm.ip1.displ, test="Chisq")
+round(xdrop1,3)
+```
+
+
+
+
+
+
+```{r include=FALSE}
+## save model output
+
+save.image("mm1_SpaghettiTube_partnerPayoffs.RData")
+```
+####Confidence intervals
+Confidence intervals for the binomial models were derived using the function bootMer of the R package lme4, using 1,000 parametric bootstraps and bootstrapping over the random effects.
+
+```{R eval=FALSE}		
+#boot.res=boot.glmm(model.res=mm.1, excl.warnings=T,nboots=1000, para=T)
+saveRDS(boot.res, "multpos_model.rds")
+```
+
+```{R echo=FALSE}		
+round(readRDS(file ="multpos_model.rds"), 3)
+```
+
+
+
+##GLMM for IP1_reach
+```{r}
+
+
+model.data1 <- all.data %>% 
+  filter(IP_LABEL=="IP1_reach")%>%
+  filter(IA_LABEL=="Left_half_display" | IA_LABEL=="Right_half_display")%>%
+  select(Subject,location,target,Session,IP_LABEL, IA_DWELL_TIME__prop)%>%
+  spread(target,IA_DWELL_TIME__prop)%>%
+  rename(dwell.prop.target=target)%>%
+  rename(dwell.prop.distractor=distractor)
+
+model.data <- all.data %>% 
+  filter(IP_LABEL=="IP1_reach")%>%
+  filter(IA_LABEL=="Left_half_display" | IA_LABEL=="Right_half_display")%>%
+  select(Subject,location,target,Session,IP_LABEL, IA_DWELL_TIME)%>%
+  spread(target,IA_DWELL_TIME)%>%
+  rename(dwell.target=target)%>%
+  rename(dwell.distractor=distractor)%>%
+  full_join(model.data1)%>%
+  mutate(dwell_prop_target_halves=(dwell.target/(dwell.target+dwell.distractor)))%>%
+  mutate(dwell_both_halves=(dwell.target+dwell.distractor))%>%
+  mutate(Session = scale(Session))
+
+model.data$resp=model.data$dwell.prop.target
+model.data$resp <- (model.data$resp*(length(model.data$resp) - 1) + 0.5)/length(model.data$resp) 
+model.data<-model.data%>%drop_na(resp)
+
+
+## code to run the model
+mm.ip1_reach.displ=glmmTMB(resp~Session+location+
+      (1|Subject),#+(0+Session|Subject),# weights=dwell_both_halves,#
+      data=model.data, family=beta_family, 
+      control=glmmTMBControl(optCtrl=list(iter.max=1000000, eval.max=1000000)))
+summary(mm.ip1_reach.displ)
+overdisp.test(mm.ip1_reach.displ)
+
+
+```
+####Null model	 
+```{r}	 
+mm.ip1_reach.displ.null=glmmTMB(resp~1+
+      (1|Subject),#+(0+Session|Subject),# weights=dwell_both_halves,#
+      data=model.data, family=beta_family, 
+      control=glmmTMBControl(optCtrl=list(iter.max=1000000, eval.max=1000000)))
+
+```
+####Full-null model comparison
+```{r}	 
+anova(mm.ip1_reach.displ, mm.ip1_reach.displ.null, test="Chisq")
+```
+####Model output
+  + Coefficients
+```{r}
+round(summary(mm.ip1_reach.displ)$coefficients$cond, 3)
+```
+  + Individual predictors: likelihood ratio tests  
+Drop1: P values for the individual effects were based on likelihood ratio tests comparing the full with respective reduced models (Barr et al., 2013; R function drop1 with argument 'test' set to "Chisq"). 
+```{r}
+xdrop1=drop1(mm.ip1_reach.displ, test="Chisq")
+round(xdrop1,3)
+```
+
+
+
+```{r include=FALSE}
+## save model output
+
+save.image("ET_lt_image.RData")
+```
+####Confidence intervals
+Confidence intervals for the binomial models were derived using the function bootMer of the R package lme4, using 1,000 parametric bootstraps and bootstrapping over the random effects.
+
+```{R eval=FALSE}		
+#boot.res=boot.glmm(model.res=mm.1, excl.warnings=T,nboots=1000, para=T)
+saveRDS(boot.res, "multpos_model.rds")
+```
+
+```{R echo=FALSE}		
+round(readRDS(file ="multpos_model.rds"), 3)
+```
+
+
+##GLMM for IP_N1
+```{r}
+
+
+model.data1 <- all.data %>% 
+  filter(IP_LABEL=="IP_AN1")%>%
+  filter(IA_LABEL=="Left_half_display" | IA_LABEL=="Right_half_display")%>%
+  select(Subject,location,target,Session,IP_LABEL, IA_DWELL_TIME__prop)%>%
+  spread(target,IA_DWELL_TIME__prop)%>%
+  rename(dwell.prop.target=target)%>%
+  rename(dwell.prop.distractor=distractor)
+
+model.data <- all.data %>% 
+  filter(IP_LABEL=="IP_AN1")%>%
+  filter(IA_LABEL=="Left_half_display" | IA_LABEL=="Right_half_display")%>%
+  select(Subject,location,target,Session,IP_LABEL, IA_DWELL_TIME)%>%
+  spread(target,IA_DWELL_TIME)%>%
+  rename(dwell.target=target)%>%
+  rename(dwell.distractor=distractor)%>%
+  full_join(model.data1)%>%
+  mutate(dwell_prop_target_halves=(dwell.target/(dwell.target+dwell.distractor)))%>%
+  mutate(dwell_both_halves=(dwell.target+dwell.distractor))%>%
+  mutate(Session = scale(Session))
+
+model.data$resp=model.data$dwell.prop.target
+model.data$resp <- (model.data$resp*(length(model.data$resp) - 1) + 0.5)/length(model.data$resp) 
+model.data<-model.data%>%drop_na(resp)
+
+
+## code to run the model
+mm.ip_an1.displ=glmmTMB(resp~Session+location+
+      (1|Subject),#+(0+Session|Subject),# weights=dwell_both_halves,#
+      data=model.data, family=beta_family, 
+      control=glmmTMBControl(optCtrl=list(iter.max=1000000, eval.max=1000000)))
+summary(mm.ip_an1.displ)
+overdisp.test(mm.ip_an1.displ)
+
+
+```
+####Null model	 
+```{r}	 
+mm.ip_an1.displ.null=glmmTMB(resp~1+
+      (1|Subject),#+(0+Session|Subject),# weights=dwell_both_halves,#
+      data=model.data, family=beta_family, 
+      control=glmmTMBControl(optCtrl=list(iter.max=1000000, eval.max=1000000)))
+
+```
+####Full-null model comparison
+```{r}	 
+anova(mm.ip_an1.displ, mm.ip_an1.displ.null, test="Chisq")
+```
+####Model output
+  + Coefficients
+```{r}
+round(summary(mm.ip_an1.displ)$coefficients$cond, 3)
+```
+  + Individual predictors: likelihood ratio tests  
+Drop1: P values for the individual effects were based on likelihood ratio tests comparing the full with respective reduced models (Barr et al., 2013; R function drop1 with argument 'test' set to "Chisq"). 
+```{r}
+xdrop1=drop1(mm.ip_an1.displ, test="Chisq")
+round(xdrop1,3)
+```
+
+
+
+```{r include=FALSE}
+## save model output
+
+save.image("ET_lt_image.RData")
+```
+####Confidence intervals
+Confidence intervals for the binomial models were derived using the function bootMer of the R package lme4, using 1,000 parametric bootstraps and bootstrapping over the random effects.
+
+```{R eval=FALSE}		
+#boot.res=boot.glmm(model.res=mm.1, excl.warnings=T,nboots=1000, para=T)
+saveRDS(boot.res, "multpos_model.rds")
+```
+
+```{R echo=FALSE}		
+round(readRDS(file ="multpos_model.rds"), 3)
+```
+
+
+
+
+
+
+##GLMM for IP1 and the agent face AOI
+```{r}
+
+
+model.data <- all.data %>% 
+  filter(IP_LABEL=="IP1")%>%
+  filter(IA_LABEL=="AOI_agent_head")%>%
+  select(Subject,location,Session,IP_LABEL, IA_DWELL_TIME__prop)%>%
+  mutate(Session = scale(Session))
+
+model.data$resp=model.data$IA_DWELL_TIME__prop
+model.data$resp <- (model.data$resp*(length(model.data$resp) - 1) + 0.5)/length(model.data$resp) 
+model.data<-model.data%>%drop_na(resp)
+
+
+## code to run the model
+mm.ip1_AOIHead=glmmTMB(resp~Session+location+
+      (1|Subject)+(0+Session|Subject),# weights=dwell_both_halves,#
+      data=model.data, family=beta_family, 
+      control=glmmTMBControl(optCtrl=list(iter.max=1000000, eval.max=1000000)))
+summary(mm.ip1_AOIHead)
+overdisp.test(mm.ip1_AOIHead)
+
+
+```
+####Null model	 
+```{r}	 
+mm.ip1_reach.displ.null=glmmTMB(resp~1+
+      (1|Subject),#+(0+Session|Subject),# weights=dwell_both_halves,#
+      data=model.data, family=beta_family, 
+      control=glmmTMBControl(optCtrl=list(iter.max=1000000, eval.max=1000000)))
+
+```
+####Full-null model comparison
+```{r}	 
+anova(mm.ip1_reach.displ, mm.ip1_reach.displ.null, test="Chisq")
+```
+####Model output
+  + Coefficients
+```{r}
+round(summary(mm.ip1_reach.displ)$coefficients$cond, 3)
+```
+  + Individual predictors: likelihood ratio tests  
+Drop1: P values for the individual effects were based on likelihood ratio tests comparing the full with respective reduced models (Barr et al., 2013; R function drop1 with argument 'test' set to "Chisq"). 
+```{r}
+xdrop1=drop1(mm.ip1_reach.displ, test="Chisq")
+round(xdrop1,3)
+```
+
+
+
+```{r include=FALSE}
+## save model output
+
+save.image("ET_lt_image.RData")
+```
+####Confidence intervals
+Confidence intervals for the binomial models were derived using the function bootMer of the R package lme4, using 1,000 parametric bootstraps and bootstrapping over the random effects.
+
+```{R eval=FALSE}		
+#boot.res=boot.glmm(model.res=mm.1, excl.warnings=T,nboots=1000, para=T)
+saveRDS(boot.res, "multpos_model.rds")
+```
+
+```{R echo=FALSE}		
+round(readRDS(file ="multpos_model.rds"), 3)
+```

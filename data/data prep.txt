@@ -1,0 +1,2 @@
+- generate subject and session column
+- replace "%" signs by "_prop"
